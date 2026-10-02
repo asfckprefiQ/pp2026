@@ -1,0 +1,5 @@
+data/input_*.txt
+data/output_*.txt
+data/*.npy
+build/
+.DS_Store
