@@ -141,8 +141,6 @@ def write_report(rows, has_par):
 
 **Курс:** Параллельное программирование, 2026 **Дедлайн:** 05.10.2026
 
-Студент: ____________, группа: ______. Дата отчёта: {date.today():%d.%m.%Y}
-
 ---
 
 ## Задание
@@ -157,21 +155,38 @@ def write_report(rows, has_par):
 ## Среда выполнения
 
 - **Устройство:** {device_name()} ({os.cpu_count()} логических ядер)
-- **ОС:** {platform.platform()}
 - **Компилятор:** {compiler_version()}, C++17
-- **Сборка:** CMake, Release (`-O3`)
+- **Сборка:** CMake + Make (Release, `-O3`)
+- **Верификация/анализ:** Python 3, NumPy, Matplotlib
 
 ## Реализация
 
-- `src/main.cpp` - чтение матриц из файла, умножение тройным циклом (`multiplyRange`, без библиотек),
-  стратегии `sequential` и `parallel_threads` (`std::thread`), запись результата и метаданных
-  (стратегия, потоки, число ядер, время). Замеряется только вычисление (без ввода-вывода).
-- `tools/generate.py` - входной файл: `N`, матрица A, матрица B (числа в [-1; 1], фиксированный seed).
-- `tools/verify.py` - сравнение с `A @ B` из NumPy.
-- `tools/run_experiments.sh`, `tools/aggregate.py`, `tools/plot.py` - эксперименты, агрегация, графики и отчёт.
+Реализованы две стратегии умножения матриц (`src/main.cpp`):
 
+1. **sequential** — классический тройной цикл `for(i) for(j) for(k)`.
+2. **parallel_threads** — та же логика, но строки результирующей матрицы делятся на `T` диапазонов, каждый обрабатывается в своём `std::thread`.
+
+Время замерялось через `std::chrono::high_resolution_clock` строго вокруг вычисления, без учёта чтения/записи файлов.
+
+Входной файл: `N`, матрица A, матрица B. Выходной файл: `N`, матрица C и метаданные (стратегия, потоки, число ядер, время).
 Объём задачи: две матрицы `N x N` (`double`), `2*N^3` операций с плавающей точкой, память `3*N^2*8` байт.
-GFLOPS = `2*N^3 / t_средн / 10^9`. Ускорение S = `T_sequential / T_p`.
+GFLOPS = `2*N^3 / t_средн / 10^9`; ускорение S = `T_sequential / T_p`.
+
+### Сборка и запуск
+
+```bash
+mkdir build && cd build
+cmake ..
+make
+cd ..
+
+python3 tools/generate.py 500 data/input_500.txt     # генерация входных данных
+./build/matmul data/input_500.txt                    # последовательная версия
+./build/matmul data/input_500.txt 4                  # 4 потока std::thread
+python3 tools/verify.py data/input_500.txt data/output_500_sequential.txt
+
+./tools/run_experiments.sh                           # вся серия экспериментов, графики, этот отчёт
+```
 
 ## Эксперименты
 
@@ -189,19 +204,12 @@ GFLOPS = `2*N^3 / t_средн / 10^9`. Ускорение S = `T_sequential / T
 
 ## Верификация
 
-Результат первого запуска каждой конфигурации сравнивался с `A @ B` из NumPy. Допуск - `1e-5`
+Результат первого запуска каждой конфигурации сравнивался с `A @ B` из NumPy. Допуск — `1e-5`
 относительно `|A|@|B|` (программа выводит числа с 6 значащими цифрами, порядок суммирования различается).
 
 ## Выводы
 
 {conclusions(rows, has_par)}
-
-## Воспроизведение
-
-```
-pip install numpy matplotlib
-./tools/run_experiments.sh
-```
 """
     with open(os.path.join(REPORT, "README.md"), "w", encoding="utf-8") as f:
         f.write(text)
