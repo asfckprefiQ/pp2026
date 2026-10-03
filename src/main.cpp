@@ -16,6 +16,7 @@ Matrix readMatrix(std::ifstream& in, int N) {
     return M;
 }
 
+// Умножение строк [rowStart, rowEnd) матрицы A на B (тройной цикл, без библиотек).
 void multiplyRange(const Matrix& A, const Matrix& B, Matrix& C, int N, int rowStart, int rowEnd) {
     for (int i = rowStart; i < rowEnd; ++i)
         for (int j = 0; j < N; ++j) {
@@ -69,6 +70,7 @@ int main(int argc, char** argv) {
 
     std::string strategy = (T <= 0) ? "sequential" : "parallel_threads";
 
+    // Замеряется только вычисление, без чтения и записи файлов.
     auto start = std::chrono::high_resolution_clock::now();
     if (strategy == "sequential") {
         multiplySequential(A, B, C, N);

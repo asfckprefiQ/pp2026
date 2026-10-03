@@ -21,6 +21,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPORT = os.path.join(ROOT, "report", "lab1")
 FIG = os.path.join(REPORT, "figures")
 
+# ВПИШИТЕ СВОИ ДАННЫЕ - они попадут в шапку отчёта
+STUDENT = "Храмов Кирилл "
+GROUP = "6212-100503D"
+
 
 def device_name():
     try:
@@ -140,6 +144,8 @@ def write_report(rows, has_par):
 ## Параллельное умножение квадратных матриц
 
 **Курс:** Параллельное программирование, 2026 **Дедлайн:** 05.10.2026
+
+**Студент:** {STUDENT} **Группа:** {GROUP}
 
 ---
 
