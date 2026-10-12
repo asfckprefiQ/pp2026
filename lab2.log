@@ -1,0 +1,87 @@
+Логических ядер: 8; потоки: 1 2 4 8; ядра: 1 2 4 8; taskset: 1
+    верификация: max_abs_err=4.999e-05 max_rel_err=1.090e-06 status=OK
+  N=200 strategy=sequential threads=0 cores=0: последний запуск 0.00634408s
+    верификация: max_abs_err=4.999e-05 max_rel_err=1.090e-06 status=OK
+  N=200 strategy=parallel_openmp threads=1 cores=0: последний запуск 0.00623834s
+    верификация: max_abs_err=4.999e-05 max_rel_err=1.090e-06 status=OK
+  N=200 strategy=parallel_openmp threads=2 cores=0: последний запуск 0.00555218s
+    верификация: max_abs_err=4.999e-05 max_rel_err=1.090e-06 status=OK
+  N=200 strategy=parallel_openmp threads=4 cores=0: последний запуск 0.0040872s
+    верификация: max_abs_err=4.999e-05 max_rel_err=1.090e-06 status=OK
+  N=200 strategy=parallel_openmp threads=8 cores=0: последний запуск 0.00932213s
+  N=200 strategy=parallel_openmp threads=1 cores=1: последний запуск 0.00732525s
+  N=200 strategy=parallel_openmp threads=2 cores=2: последний запуск 0.00523946s
+  N=200 strategy=parallel_openmp threads=4 cores=4: последний запуск 0.00435935s
+  N=200 strategy=parallel_openmp threads=8 cores=8: последний запуск 0.002894s
+    верификация: max_abs_err=5.000e-05 max_rel_err=5.996e-07 status=OK
+  N=400 strategy=sequential threads=0 cores=0: последний запуск 0.0719492s
+    верификация: max_abs_err=5.000e-05 max_rel_err=5.996e-07 status=OK
+  N=400 strategy=parallel_openmp threads=1 cores=0: последний запуск 0.0778197s
+    верификация: max_abs_err=5.000e-05 max_rel_err=5.996e-07 status=OK
+  N=400 strategy=parallel_openmp threads=2 cores=0: последний запуск 0.0459098s
+    верификация: max_abs_err=5.000e-05 max_rel_err=5.996e-07 status=OK
+  N=400 strategy=parallel_openmp threads=4 cores=0: последний запуск 0.039686s
+    верификация: max_abs_err=5.000e-05 max_rel_err=5.996e-07 status=OK
+  N=400 strategy=parallel_openmp threads=8 cores=0: последний запуск 0.0406265s
+  N=400 strategy=parallel_openmp threads=1 cores=1: последний запуск 0.0698804s
+  N=400 strategy=parallel_openmp threads=2 cores=2: последний запуск 0.05563s
+  N=400 strategy=parallel_openmp threads=4 cores=4: последний запуск 0.0384404s
+  N=400 strategy=parallel_openmp threads=8 cores=8: последний запуск 0.0412759s
+    верификация: max_abs_err=5.000e-05 max_rel_err=2.753e-07 status=OK
+  N=800 strategy=sequential threads=0 cores=0: последний запуск 0.951354s
+    верификация: max_abs_err=5.000e-05 max_rel_err=2.753e-07 status=OK
+  N=800 strategy=parallel_openmp threads=1 cores=0: последний запуск 1.00382s
+    верификация: max_abs_err=5.000e-05 max_rel_err=2.753e-07 status=OK
+  N=800 strategy=parallel_openmp threads=2 cores=0: последний запуск 0.491389s
+    верификация: max_abs_err=5.000e-05 max_rel_err=2.753e-07 status=OK
+  N=800 strategy=parallel_openmp threads=4 cores=0: последний запуск 0.40645s
+    верификация: max_abs_err=5.000e-05 max_rel_err=2.753e-07 status=OK
+  N=800 strategy=parallel_openmp threads=8 cores=0: последний запуск 0.429964s
+  N=800 strategy=parallel_openmp threads=1 cores=1: последний запуск 0.820995s
+  N=800 strategy=parallel_openmp threads=2 cores=2: последний запуск 0.488459s
+  N=800 strategy=parallel_openmp threads=4 cores=4: последний запуск 0.46039s
+  N=800 strategy=parallel_openmp threads=8 cores=8: последний запуск 0.452534s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.840e-07 status=OK
+  N=1200 strategy=sequential threads=0 cores=0: последний запуск 3.39781s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.840e-07 status=OK
+  N=1200 strategy=parallel_openmp threads=1 cores=0: последний запуск 3.4875s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.840e-07 status=OK
+  N=1200 strategy=parallel_openmp threads=2 cores=0: последний запуск 4.91028s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.840e-07 status=OK
+  N=1200 strategy=parallel_openmp threads=4 cores=0: последний запуск 2.20904s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.840e-07 status=OK
+  N=1200 strategy=parallel_openmp threads=8 cores=0: последний запуск 2.99981s
+  N=1200 strategy=parallel_openmp threads=1 cores=1: последний запуск 2.96252s
+  N=1200 strategy=parallel_openmp threads=2 cores=2: последний запуск 2.20213s
+  N=1200 strategy=parallel_openmp threads=4 cores=4: последний запуск 1.82272s
+  N=1200 strategy=parallel_openmp threads=8 cores=8: последний запуск 2.63315s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.378e-07 status=OK
+  N=1600 strategy=sequential threads=0 cores=0: последний запуск 8.74195s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.378e-07 status=OK
+  N=1600 strategy=parallel_openmp threads=1 cores=0: последний запуск 7.49635s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.378e-07 status=OK
+  N=1600 strategy=parallel_openmp threads=2 cores=0: последний запуск 4.67972s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.378e-07 status=OK
+  N=1600 strategy=parallel_openmp threads=4 cores=0: последний запуск 7.35036s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.378e-07 status=OK
+  N=1600 strategy=parallel_openmp threads=8 cores=0: последний запуск 8.39813s
+  N=1600 strategy=parallel_openmp threads=1 cores=1: последний запуск 9.23053s
+  N=1600 strategy=parallel_openmp threads=2 cores=2: последний запуск 8.21166s
+  N=1600 strategy=parallel_openmp threads=4 cores=4: последний запуск 14.013s
+  N=1600 strategy=parallel_openmp threads=8 cores=8: последний запуск 9.48709s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.072e-07 status=OK
+  N=2000 strategy=sequential threads=0 cores=0: последний запуск 28.3235s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.072e-07 status=OK
+  N=2000 strategy=parallel_openmp threads=1 cores=0: последний запуск 22.4225s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.072e-07 status=OK
+  N=2000 strategy=parallel_openmp threads=2 cores=0: последний запуск 16.8873s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.072e-07 status=OK
+  N=2000 strategy=parallel_openmp threads=4 cores=0: последний запуск 12.9868s
+    верификация: max_abs_err=5.000e-05 max_rel_err=1.072e-07 status=OK
+  N=2000 strategy=parallel_openmp threads=8 cores=0: последний запуск 14.6691s
+  N=2000 strategy=parallel_openmp threads=1 cores=1: последний запуск 23.7349s
+  N=2000 strategy=parallel_openmp threads=2 cores=2: последний запуск 16.3859s
+  N=2000 strategy=parallel_openmp threads=4 cores=4: последний запуск 12.8987s
+  N=2000 strategy=parallel_openmp threads=8 cores=8: последний запуск 14.6411s
+Готово: report/lab2/figures/ и README.md
+Готово: data/results_lab2.csv, report/lab2/README.md, report/lab2/figures/

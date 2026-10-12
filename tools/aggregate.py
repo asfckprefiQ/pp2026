@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Агрегация data/results.csv (каждый запуск - строка) по (N, стратегия, потоки):
-среднее / минимум / σ времени, GFLOPS, ускорение относительно sequential.
+"""Агрегация data/results.csv (каждый запуск - строка) по (N, стратегия, потоки, ядра):
+среднее / минимум / σ времени, GFLOPS, ускорение и эффективность относительно sequential.
 
   python3 tools/aggregate.py          # печатает таблицу в формате Markdown
 """
@@ -17,14 +17,15 @@ def aggregate(path=RESULTS):
     groups = defaultdict(list)
     with open(path, newline="") as f:
         for r in csv.DictReader(f):
-            groups[(int(r["n"]), r["strategy"], int(r["threads"]))].append(r)
+            cores = int(r.get("cores") or 0)  # 0 = без ограничения числа ядер
+            groups[(int(r["n"]), r["strategy"], int(r["threads"]), cores)].append(r)
 
     rows = []
-    for (n, strategy, threads), rs in groups.items():
+    for (n, strategy, threads, cores), rs in groups.items():
         t = [float(r["time_seconds"]) for r in rs]
         checked = [r for r in rs if r["verified"] in ("OK", "FAIL")]
         rows.append({
-            "n": n, "strategy": strategy, "threads": threads, "runs": len(t),
+            "n": n, "strategy": strategy, "threads": threads, "cores": cores, "runs": len(t),
             "mean": statistics.mean(t), "min": min(t), "std": statistics.pstdev(t),
             "gflops": 2.0 * n ** 3 / statistics.mean(t) / 1e9,
             "verified": "FAIL" if any(r["verified"] == "FAIL" for r in checked) else ("OK" if checked else "NA"),
@@ -33,7 +34,8 @@ def aggregate(path=RESULTS):
     base = {r["n"]: r["mean"] for r in rows if r["threads"] == 0}
     for r in rows:
         r["speedup"] = base[r["n"]] / r["mean"] if r["n"] in base else None
-    rows.sort(key=lambda r: (r["threads"], r["n"]))
+        r["efficiency"] = r["speedup"] / r["threads"] if r["speedup"] is not None and r["threads"] > 0 else None
+    rows.sort(key=lambda r: (r["cores"], r["threads"], r["n"]))
     return rows
 
 

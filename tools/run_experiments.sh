@@ -19,7 +19,7 @@ if command -v cmake > /dev/null; then
     cmake --build build > /dev/null
 else   # запасной вариант без CMake
     mkdir -p build
-    g++ -O3 -std=c++17 -pthread -o build/matmul src/main.cpp
+    g++ -O3 -std=c++17 -pthread -fopenmp -o build/matmul src/main.cpp
 fi
 BIN=""
 for c in build/matmul build/matmul.exe build/Release/matmul.exe; do

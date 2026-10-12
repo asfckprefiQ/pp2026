@@ -6,6 +6,8 @@
 #include <thread>
 #include <vector>
 
+#include <omp.h>
+
 using Matrix = std::vector<std::vector<double>>;
 
 Matrix readMatrix(std::ifstream& in, int N) {
@@ -42,11 +44,26 @@ void multiplyStdThreads(const Matrix& A, const Matrix& B, Matrix& C, int N, int 
     for (auto& w : workers) w.join();
 }
 
+// Лаба 2: параллельный внешний цикл по строкам результирующей матрицы (OpenMP).
+void multiplyOpenMP(const Matrix& A, const Matrix& B, Matrix& C, int N, int T) {
+    omp_set_dynamic(0);        // ровно T потоков, без автоподбора
+    omp_set_num_threads(T);
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            double sum = 0.0;
+            for (int k = 0; k < N; ++k)
+                sum += A[i][k] * B[k][j];
+            C[i][j] = sum;
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Использование: ./matmul <input_file> [threads] [backend]\n";
         std::cerr << "  threads=0 или не указан -> последовательная версия\n";
-        std::cerr << "  backend: std (по умолчанию, std::thread)\n";
+        std::cerr << "  backend: std (по умолчанию, std::thread) | omp (OpenMP)\n";
         return 1;
     }
     std::ifstream in(argv[1]);
@@ -57,8 +74,8 @@ int main(int argc, char** argv) {
 
     int T = (argc >= 3) ? std::stoi(argv[2]) : 0;
     std::string backend = (argc >= 4) ? argv[3] : "std";
-    if (T > 0 && backend != "std") {
-        std::cerr << "Backend '" << backend << "' недоступен в этой версии (есть только std)\n";
+    if (T > 0 && backend != "std" && backend != "omp") {
+        std::cerr << "Неизвестный backend '" << backend << "' (допустимо: std, omp)\n";
         return 1;
     }
 
@@ -68,12 +85,21 @@ int main(int argc, char** argv) {
     Matrix B = readMatrix(in, N);
     Matrix C(N, std::vector<double>(N, 0.0));
 
-    std::string strategy = (T <= 0) ? "sequential" : "parallel_threads";
+    std::string strategy;
+    if (T <= 0) {
+        strategy = "sequential";
+    } else if (backend == "omp") {
+        strategy = "parallel_openmp";
+    } else {
+        strategy = "parallel_threads";
+    }
 
     // Замеряется только вычисление, без чтения и записи файлов.
     auto start = std::chrono::high_resolution_clock::now();
     if (strategy == "sequential") {
         multiplySequential(A, B, C, N);
+    } else if (strategy == "parallel_openmp") {
+        multiplyOpenMP(A, B, C, N, T);
     } else {
         multiplyStdThreads(A, B, C, N, T);
     }
