@@ -23,11 +23,14 @@ def aggregate(path=RESULTS):
     rows = []
     for (n, strategy, threads, cores), rs in groups.items():
         t = [float(r["time_seconds"]) for r in rs]
+        kt = [float(r["kernel_seconds"]) for r in rs if r.get("kernel_seconds")]
         checked = [r for r in rs if r["verified"] in ("OK", "FAIL")]
         rows.append({
             "n": n, "strategy": strategy, "threads": threads, "cores": cores, "runs": len(t),
             "mean": statistics.mean(t), "min": min(t), "std": statistics.pstdev(t),
             "gflops": 2.0 * n ** 3 / statistics.mean(t) / 1e9,
+            "kernel_mean": statistics.mean(kt) if kt else None,
+            "kernel_gflops": 2.0 * n ** 3 / statistics.mean(kt) / 1e9 if kt else None,
             "verified": "FAIL" if any(r["verified"] == "FAIL" for r in checked) else ("OK" if checked else "NA"),
             "max_rel_err": max((float(r["max_rel_err"]) for r in checked if r["max_rel_err"]), default=0.0),
         })

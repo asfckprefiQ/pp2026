@@ -7,17 +7,20 @@
 - [Лабораторная работа 1](report/lab1/README.md) — последовательная версия и параллельная версия на `std::thread`.
 - [Лабораторная работа 2](report/lab2/README.md) — параллельная версия на OpenMP.
 - [Лабораторная работа 4](report/lab4/README.md) — параллельная версия на CUDA.
+- [Лабораторная работа 5](report/lab5/README.md) — параллельное построение множества Мандельброта на `std::thread` (Program 1 из [stanford-cs149/asst1](https://github.com/stanford-cs149/asst1)).
 
 ## Структура репозитория
 
 - `src/main.cpp` — реализация всех стратегий (sequential, std::thread, OpenMP, CUDA)
 - `src/cuda_matmul.cu`, `src/cuda_matmul.h` — CUDA-ядра (naive и tiled) и их вызов с хоста
+- `asst1/` — Program 1 из asst1 (лаба 5): `asst1/prog1_mandelbrot_threads`
 - `tools/` — генерация данных, верификация, агрегация, графики
-- `data/` — входные данные (не хранятся в git) и `results.csv` (лаба 1), `results_lab2.csv` (лаба 2), `results_lab4.csv` и `device_lab4.txt` (лаба 4)
+- `data/` — входные данные (не хранятся в git) и `results.csv` (лаба 1), `results_lab2.csv` (лаба 2), `results_lab4.csv` и `device_lab4.txt` (лаба 4), `results_lab5.csv` (лаба 5)
 - `report/`
   - `lab1/` — отчёт и графики лабы 1
   - `lab2/` — отчёт и графики лабы 2
   - `lab4/` — отчёт и графики лабы 4
+  - `lab5/` — отчёт и графики лабы 5
 - `CMakeLists.txt`
 
 ## Сборка и запуск
@@ -62,3 +65,11 @@ python3 tools/plot_lab4.py --os "Ubuntu 24.04 (Google Colab)" --compiler "g++ 11
 
 Если своей видеокарты нет, серию можно выполнить в Google Colab (среда выполнения с GPU T4), затем скачать
 `data/results_lab4.csv`, `data/device_lab4.txt` и пересобрать отчёт командой `plot_lab4.py` выше.
+
+Лаба 5 (Mandelbrot, `std::thread`; блочное и чередующееся разбиение строк, 1–8 и 16 потоков, view 1 и 2):
+
+```
+./tools/run_experiments_lab5.sh
+python3 tools/plot_lab5.py
+RUNS=1 ./tools/run_experiments_lab5.sh   # быстрый пробный прогон
+```

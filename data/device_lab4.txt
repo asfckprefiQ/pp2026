@@ -1,0 +1,5 @@
+device Tesla T4 (compute capability 7.5)
+sm_count 40
+Cuda compilation tools, release 13.0, V13.0.88
+cpu Intel(R) Xeon(R) CPU @ 2.00GHz
+cores 2
