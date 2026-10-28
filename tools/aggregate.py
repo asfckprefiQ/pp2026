@@ -27,7 +27,7 @@ def aggregate(path=RESULTS):
         checked = [r for r in rs if r["verified"] in ("OK", "FAIL")]
         rows.append({
             "n": n, "strategy": strategy, "threads": threads, "cores": cores, "runs": len(t),
-            "mean": statistics.mean(t), "min": min(t), "std": statistics.pstdev(t),
+            "mean": statistics.mean(t), "median": statistics.median(t), "min": min(t), "std": statistics.pstdev(t),
             "gflops": 2.0 * n ** 3 / statistics.mean(t) / 1e9,
             "kernel_mean": statistics.mean(kt) if kt else None,
             "kernel_gflops": 2.0 * n ** 3 / statistics.mean(kt) / 1e9 if kt else None,

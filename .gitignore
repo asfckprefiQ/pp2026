@@ -1,5 +1,7 @@
-data/input_*.txt
-data/output_*.txt
-data/*.npy
-build/
-.DS_Store
+asst1/**/objs/
+asst1/**/mandelbrot
+asst1/**/*.ppm
+data/lab5_work/
+asst1/**/objs/
+asst1/**/mandelbrot
+data/lab5_work/
