@@ -1,7 +1,22 @@
+# сборка
+build/
 asst1/**/objs/
 asst1/**/mandelbrot
 asst1/**/*.ppm
+
+# входные и выходные матрицы (генерируются tools/generate.py, слишком большие для git)
+data/input_*.txt
+data/input_*.npy
+data/output_*.txt
 data/lab5_work/
-asst1/**/objs/
-asst1/**/mandelbrot
-data/lab5_work/
+data/lab3_out/
+
+# лаба 3: архив для суперкомпьютера и логи PBS
+lab3_bundle.tar.gz
+*.o[0-9]*
+*.e[0-9]*
+
+# мусор
+__pycache__/
+*.pyc
+*Zone.Identifier
