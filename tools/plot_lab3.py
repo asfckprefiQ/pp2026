@@ -2,15 +2,19 @@
 """Графики и отчёт лабы 3: data/results_lab3.csv -> report/lab3/figures/*.png и report/lab3/README.md.
 
   python3 tools/plot_lab3.py
-  python3 tools/plot_lab3.py --platform "Суперкомпьютер «Сергей Королёв», 2 узла по 16 ядер" --cores-total 32
+  python3 tools/plot_lab3.py --platform "суперкомпьютер «Сергей Королёв» (Самарский университет)"
   python3 tools/plot_lab3.py --skip-report
-Имя и группа берутся из tools/plot.py (STUDENT, GROUP).
+
+Сведения о платформе (процессор, MPI, компилятор, узлы) берутся из data/env_lab3.txt, который пишет
+tools/run_experiments_lab3.sh на той машине, где шли замеры (в т.ч. на кластере); если файла нет - с текущей машины.
+Время в таблицах - медиана по повторам; S(p) = T(1) / T(p) относительно MPI-версии на одном процессе,
+E = S / p. Имя и группа берутся из tools/plot.py (STUDENT, GROUP).
 """
 import argparse
+import csv
 import os
-import platform
+import statistics
 import subprocess
-from datetime import date
 
 import matplotlib
 matplotlib.use("Agg")
@@ -21,28 +25,90 @@ from plot import STUDENT, GROUP, device_name
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RES = os.path.join(ROOT, "data", "results_lab3.csv")
+ENV = os.path.join(ROOT, "data", "env_lab3.txt")
+RES_LAB2 = os.path.join(ROOT, "data", "results_lab2.csv")
 REPORT = os.path.join(ROOT, "report", "lab3")
 FIG = os.path.join(REPORT, "figures")
 
 
-def mpi_version():
-    for cmd in (["mpirun", "--version"], ["mpiexec", "--version"]):
-        try:
-            out = subprocess.run(cmd, capture_output=True, text=True).stdout.strip().splitlines()
-            if out:
-                return out[0]
-        except Exception:
-            pass
-    return "MPI (версию уточните)"
+def c(x, nd=2):
+    """Число с десятичной запятой."""
+    return f"{x:.{nd}f}".replace(".", ",")
 
 
-def compiler_version():
-    for cmd in (["mpicxx", "--version"], ["c++", "--version"]):
-        try:
-            return subprocess.run(cmd, capture_output=True, text=True).stdout.splitlines()[0]
-        except Exception:
-            pass
-    return "unknown"
+def ct(t):
+    return c(t, 3 if t >= 0.01 else 4)
+
+
+def first_line(cmd):
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True)
+        lines = (out.stdout + out.stderr).strip().splitlines()
+        return lines[0].strip() if lines else ""
+    except Exception:
+        return ""
+
+
+def load_env():
+    env = {}
+    if os.path.exists(ENV):
+        with open(ENV, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    env.setdefault(k.strip(), v.strip())
+    env.setdefault("cpu", device_name())
+    env.setdefault("cores_per_node", str(os.cpu_count() or ""))
+    env.setdefault("compiler", first_line(["mpicxx", "--version"]) or first_line(["c++", "--version"]) or "unknown")
+    env.setdefault("mpi", first_line(["mpirun", "--version"]) or "MPI (версию уточните)")
+    return env
+
+
+def load_extra():
+    """Медианы времени вычисления и число узлов по (N, P) из CSV (их нет в aggregate)."""
+    comp, nodes = {}, {}
+    with open(RES, newline="") as f:
+        for r in csv.DictReader(f):
+            key = (int(r["n"]), int(r["threads"]))
+            if r.get("compute_seconds"):
+                comp.setdefault(key, []).append(float(r["compute_seconds"]))
+            if r.get("nodes"):
+                nodes[key] = int(r["nodes"])
+    return {k: statistics.median(v) for k, v in comp.items()}, nodes
+
+
+class Data:
+    def __init__(self, rows, comp, nodes):
+        self.rows = rows
+        self.seq = {r["n"]: r for r in rows if r["threads"] == 0}
+        self.mpi = [r for r in rows if r["threads"] > 0]
+        self.P = sorted({r["threads"] for r in self.mpi})
+        self.med = {(r["n"], r["threads"]): r["median"] for r in self.mpi}
+        self.N = sorted(n for n in {r["n"] for r in self.mpi} if all((n, p) in self.med for p in self.P))
+        self.p0 = self.P[0]
+        self.pmax = self.P[-1]
+        self.runs = self.mpi[0]["runs"]
+        self.comp = comp
+        self.nodes = nodes
+
+    def S(self, n, p):
+        return self.med[(n, self.p0)] / self.med[(n, p)]
+
+    def E(self, n, p):
+        return self.S(n, p) / (p / self.p0)
+
+    def gflops(self, n, p):
+        return 2.0 * n ** 3 / self.med[(n, p)] / 1e9
+
+    def comm_share(self, n, p):
+        """Доля времени на обмены (Bcast + Scatterv + Gatherv + ожидание) в полном времени."""
+        if (n, p) not in self.comp or (n, p) not in self.med:
+            return None
+        return max(0.0, 1.0 - self.comp[(n, p)] / self.med[(n, p)])
+
+    def nodes_for(self, p):
+        vals = {v for (n, q), v in self.nodes.items() if q == p}
+        return max(vals) if vals else None
 
 
 def save(name):
@@ -51,108 +117,258 @@ def save(name):
     plt.close()
 
 
-def make_plots(rows, cores_total):
+def make_plots(d, cores_per_node):
     os.makedirs(FIG, exist_ok=True)
-    seq = sorted((r for r in rows if r["threads"] == 0), key=lambda r: r["n"])
-    mpi = [r for r in rows if r["threads"] > 0]
-    procs = sorted({r["threads"] for r in mpi})
     made = []
 
     plt.figure(figsize=(7, 4.5))
-    if seq:
-        plt.plot([r["n"] for r in seq], [r["mean"] for r in seq], "o-", label="sequential")
-    for p in procs:
-        rs = sorted((r for r in mpi if r["threads"] == p), key=lambda r: r["n"])
-        plt.plot([r["n"] for r in rs], [r["mean"] for r in rs], "o-", label=f"MPI, {p} проц.")
-    plt.xlabel("Размер матрицы N"); plt.ylabel("Время, с"); plt.grid(True); plt.legend(fontsize=8)
-    plt.title("Время умножения от размера матрицы")
+    seq_n = [n for n in d.N if n in d.seq]
+    if seq_n:
+        plt.loglog(seq_n, [d.seq[n]["median"] for n in seq_n], "ks--", label="sequential")
+    for p in d.P:
+        plt.loglog(d.N, [d.med[(n, p)] for n in d.N], "o-", label=f"MPI, {p} проц.")
+    plt.xlabel("Размер матрицы N"); plt.ylabel("Время, с"); plt.grid(True, which="both", alpha=0.4); plt.legend(fontsize=8)
+    plt.title("Время выполнения от размера матрицы")
     save("time_vs_size.png"); made.append("time_vs_size.png")
 
-    sp = [r for r in mpi if r["speedup"] is not None]
-    if sp:
-        pmax = max(r["threads"] for r in sp)
-        for key, ylabel, fname, title in (
-                ("speedup", "Ускорение S = T1 / Tp", "speedup_vs_procs.png", "Ускорение от числа процессов"),
-                ("efficiency", "Эффективность E = S / p", "efficiency_vs_procs.png", "Эффективность от числа процессов")):
+    if len(d.P) > 1:
+        plt.figure(figsize=(7, 4.5))
+        for n in d.N:
+            plt.plot(d.P, [d.S(n, p) for p in d.P], "o-", label=f"N={n}")
+        plt.plot(d.P, [p / d.p0 for p in d.P], "k--", label="идеальное линейное")
+        if cores_per_node and d.p0 < cores_per_node < d.pmax:
+            plt.axvline(cores_per_node, color="gray", ls=":", label=f"ядер в узле: {cores_per_node}")
+        plt.xlabel("Число MPI-процессов"); plt.ylabel(f"Ускорение S = T({d.p0}) / T(p)"); plt.grid(True)
+        plt.legend(fontsize=8)
+        plt.title("Ускорение от числа процессов")
+        save("speedup_vs_procs.png"); made.append("speedup_vs_procs.png")
+
+        plt.figure(figsize=(7, 4.5))
+        for n in d.N:
+            plt.plot(d.P, [d.E(n, p) for p in d.P], "o-", label=f"N={n}")
+        plt.axhline(1.0, color="k", ls="--", label="идеал")
+        plt.xlabel("Число MPI-процессов"); plt.ylabel("Эффективность E = S / p"); plt.grid(True); plt.legend(fontsize=8)
+        plt.title("Эффективность от числа процессов")
+        save("efficiency_vs_procs.png"); made.append("efficiency_vs_procs.png")
+
+        if d.comp:
             plt.figure(figsize=(7, 4.5))
-            for n in sorted({r["n"] for r in sp}):
-                rs = sorted((r for r in sp if r["n"] == n), key=lambda r: r["threads"])
-                plt.plot([r["threads"] for r in rs], [r[key] for r in rs], "o-", label=f"N={n}")
-            if key == "speedup":
-                plt.plot([1, pmax], [1, pmax], "k--", label="идеал")
-            else:
-                plt.axhline(1.0, color="k", ls="--", label="идеал")
-            if cores_total:
-                plt.axvline(cores_total, color="gray", ls=":", label=f"ядер: {cores_total}")
-            plt.xlabel("Число MPI-процессов"); plt.ylabel(ylabel); plt.grid(True); plt.legend(fontsize=8)
-            plt.title(title)
-            save(fname); made.append(fname)
+            for n in d.N:
+                vals = [d.comm_share(n, p) for p in d.P]
+                if all(v is not None for v in vals):
+                    plt.plot(d.P, [100 * v for v in vals], "o-", label=f"N={n}")
+            plt.xlabel("Число MPI-процессов"); plt.ylabel("Доля обменов, %"); plt.grid(True); plt.legend(fontsize=8)
+            plt.title("Доля пересылок данных в общем времени")
+            save("comm_share_vs_procs.png"); made.append("comm_share_vs_procs.png")
     return made
 
 
-def table(rows):
-    head = ("| N | Режим | Процессов | Запусков | t средн., с | t мин., с | σ, с | Ускорение S | "
-            "Эффективность E | GFLOPS | Верификация | Макс. отн. погрешность |\n" + "|---" * 12 + "|")
-    lines = [head]
-    for r in sorted(rows, key=lambda r: (r["n"], r["threads"])):
-        mode = "sequential" if r["threads"] == 0 else "MPI"
-        sp = "-" if r["speedup"] is None else f"{r['speedup']:.2f}"
-        ef = "-" if r["efficiency"] is None else f"{r['efficiency']:.2f}"
-        lines.append(f"| {r['n']} | {mode} | {r['threads']} | {r['runs']} | {r['mean']:.4f} | {r['min']:.4f} | "
-                     f"{r['std']:.4f} | {sp} | {ef} | {r['gflops']:.3f} | {r['verified']} | {r['max_rel_err']:.1e} |")
+def wide_table(d):
+    p0, others = d.P[0], d.P[1:]
+    head = ["N", "посл., с", (f"{p0} процесс, с" if p0 == 1 else f"{p0} проц., с")] + [f"{p} проц., с" for p in others] \
+        + [f"S ({p})" for p in others] + ([f"E ({d.pmax})"] if others else [])
+    lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    for n in d.N:
+        seq = ct(d.seq[n]["median"]) if n in d.seq else "-"
+        cells = [str(n), seq, ct(d.med[(n, p0)])] + [ct(d.med[(n, p)]) for p in others] \
+            + [c(d.S(n, p)) for p in others] + ([c(d.E(n, d.pmax))] if others else [])
+        lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
-def conclusions(rows, cores_total):
-    mpi = [r for r in rows if r["threads"] > 0 and r["speedup"] is not None]
-    out = []
-    checked = [r for r in rows if r["verified"] != "NA"]
+def detail_table(d):
+    head = ("| N | Режим | Процессов | Узлов | Запусков | t медиана, с | t средн., с | t мин., с | σ, с | "
+            "Доля обменов | GFLOPS | Верификация | Макс. отн. погрешность |\n" + "|---" * 13 + "|")
+    lines = [head]
+    for r in sorted(d.rows, key=lambda r: (r["n"], r["threads"])):
+        p = r["threads"]
+        mode = "sequential" if p == 0 else "MPI"
+        nodes = d.nodes.get((r["n"], p), "-")
+        share = d.comm_share(r["n"], p) if p > 0 else None
+        share = "-" if share is None else f"{100 * share:.1f}%"
+        lines.append(f"| {r['n']} | {mode} | {p} | {nodes} | {r['runs']} | {r['median']:.4f} | {r['mean']:.4f} | "
+                     f"{r['min']:.4f} | {r['std']:.4f} | {share} | {r['gflops']:.3f} | {r['verified']} | "
+                     f"{r['max_rel_err']:.1e} |")
+    return "\n".join(lines)
+
+
+def span(vals):
+    lo, hi = min(vals), max(vals)
+    return c(lo) if abs(hi - lo) < 0.005 else f"{c(lo)}–{c(hi)}"
+
+
+def placement_text(d):
+    parts = []
+    for p in d.P:
+        k = d.nodes_for(p)
+        if k:
+            parts.append(f"{p} — {k} {'узел' if k == 1 else ('узла' if k < 5 else 'узлов')}")
+    return ("Размещение процессов по узлам: " + ", ".join(parts) + ".") if parts else ""
+
+
+def text_table(d):
+    if len(d.P) < 2:
+        return ""
+    parts = []
+    mids = [p for p in d.P[1:-1]] or d.P[1:]
+    near = [p for p in mids if all(d.E(n, p) >= 0.85 for n in d.N)]
+    far = [p for p in mids if p not in near]
+    if near:
+        parts.append(f"На {', '.join(str(p) for p in near)} процессах ускорение близко к линейному на всех размерах "
+                     f"(при {near[-1]} процессах S = {span([d.S(n, near[-1]) for n in d.N])}).")
+    for p in far:
+        parts.append(f"На {p} процессах S = {span([d.S(n, p) for n in d.N])}, эффективность "
+                     f"{span([d.E(n, p) for n in d.N])}.")
+    es = [d.E(n, d.pmax) for n in d.N]
+    multi = (d.nodes_for(d.pmax) or 1) > 1
+    parts.append(f"На {d.pmax} процессах эффективность равна {span(es)}"
+                 + (": она падает" if min(es) < 0.9 else ": потери невелики")
+                 + ", потому что рассылка матрицы B (`MPI_Bcast`) и сбор результата (`MPI_Gatherv`) не ускоряются с ростом числа "
+                   "процессов, а объём вычислений на каждый процесс уменьшается"
+                 + ("; при размещении на нескольких узлах данные идут по сети InfiniBand, а не через общую память." if multi
+                    else "; кроме того, процессы одного узла делят пропускную способность памяти."))
+    nmax = d.N[-1]
+    g0, g1 = d.gflops(nmax, d.p0), d.gflops(nmax, d.pmax)
+    parts.append(f"Производительность при N = {nmax} {'выросла' if g1 > g0 else 'изменилась'} с ≈{c(g0, 2)} GFLOPS на {d.p0} процессе "
+                 f"до ≈{c(g1, 2)} GFLOPS на {d.pmax} процессах.")
+    return " ".join(parts)
+
+
+def text_fig1(d):
+    if len(d.P) < 2:
+        return ""
+    steps = []
+    for a, b in zip(d.P, d.P[1:]):
+        ratios = [d.med[(n, a)] / d.med[(n, b)] for n in d.N]
+        steps.append((a, b, sum(ratios) / len(ratios)))
+    txt = ("В логарифмической шкале кривые для разного числа процессов идут примерно параллельно (время ~ N³). "
+           "Среднее по размерам сокращение времени при увеличении числа процессов: "
+           + ", ".join((f"{a}→{b} в {c(r)} раза" if r >= 1 else f"{a}→{b} замедление в {c(1 / r)} раза") for a, b, r in steps) + ".")
+    if len(steps) >= 2 and steps[-1][2] < steps[0][2] - 0.2:
+        txt += " Выигрыш от каждого следующего увеличения числа процессов уменьшается."
+    if any(r < 1 for _, _, r in steps):
+        txt += (" Замедление при большем числе процессов возможно, если процессов больше, чем доступных ядер, "
+                "или если накладные расходы на пересылки превышают выигрыш от вычислений (малые N).")
+    return txt
+
+
+def text_fig2(d):
+    if len(d.P) < 2:
+        return ""
+    nmax = d.N[-1]
+    ps = d.P[1:]
+    vals = ", ".join(f"{c(d.S(nmax, p))} на {p}" for p in ps)
+    txt = f"При N = {nmax} ускорение составляет {vals} процессах (идеал — равное числу процессов)."
+    eff = [d.E(nmax, p) for p in ps]
+    if eff[-1] < 0.85:
+        txt += f" Отставание от идеала растёт с числом процессов (эффективность {c(eff[-1])} на {ps[-1]}) — это накладные расходы на коммуникации."
+    elif max(eff) > 1.05:
+        txt += (" Эффективность выше 1 (сверхлинейное ускорение) объясняется кэшем: на каждый процесс приходится меньше строк A, "
+                "и рабочий набор лучше помещается в кэш процессора.")
+    return txt
+
+
+def text_fig3(d):
+    if len(d.P) < 2 or len(d.N) < 2:
+        return ""
+    lo, hi = d.E(d.N[0], d.pmax), d.E(d.N[-1], d.pmax)
+    if hi > lo:
+        return (f"Эффективность на {d.pmax} процессах растёт с размером матрицы ({c(lo)} при N = {d.N[0]} и {c(hi)} при N = {d.N[-1]}): "
+                "объём вычислений растёт как N³, а пересылаемых данных — как N², поэтому доля коммуникаций падает.")
+    return (f"Эффективность на {d.pmax} процессах: {c(lo)} при N = {d.N[0]} и {c(hi)} при N = {d.N[-1]}.")
+
+
+def text_fig4(d):
+    if not d.comp or len(d.P) < 2:
+        return ""
+    lo, hi = d.comm_share(d.N[-1], d.pmax), d.comm_share(d.N[0], d.pmax)
+    if lo is None or hi is None:
+        return ""
+    return (f"Доля обменов = 1 − t_вычисл / t_общ, где t_вычисл — максимальное по процессам время умножения своих строк. "
+            f"На {d.pmax} процессах она составляет {c(100 * hi, 1)}% при N = {d.N[0]} и {c(100 * lo, 1)}% при N = {d.N[-1]}: "
+            "пересылается O(N²) данных, а считается O(N³), поэтому для больших матриц распараллеливание окупается лучше.")
+
+
+def openmp_comparison(d):
+    if not os.path.exists(RES_LAB2):
+        return ""
+    try:
+        rows2 = aggregate(RES_LAB2)
+    except Exception:
+        return ""
+    nmax = d.N[-1]
+    cand = [r for r in rows2 if r["strategy"] == "parallel_openmp" and r["cores"] == 0 and r["n"] == nmax
+            and r["speedup"] is not None and r["threads"] <= d.pmax]
+    if not cand:
+        return ""
+    o = max(cand, key=lambda r: r["threads"])
+    if (nmax, o["threads"]) not in d.med:
+        return ""
+    m = d.S(nmax, o["threads"])
+    rel = "близко к" if abs(m - o["speedup"]) / o["speedup"] < 0.15 else ("выше, чем" if m > o["speedup"] else "ниже, чем")
+    return (f" Для сравнения: ускорение MPI на {o['threads']} процессах ({c(m)}) {rel} ускорение OpenMP из лабораторной работы 2 "
+            f"на {o['threads']} потоках ({c(o['speedup'])}; замеры OpenMP шли на ноутбуке, MPI — на кластере). "
+            "MPI дополнительно тратит время на пересылки, которые OpenMP не нужны благодаря общей памяти, зато MPI "
+            "масштабируется за пределы одного узла (распределённая память).")
+
+
+def text_conclusion(d, where):
+    nmax = d.N[-1]
+    checked = [r for r in d.rows if r["verified"] != "NA"]
     if checked and all(r["verified"] == "OK" for r in checked):
-        out.append("1. **Корректность.** Результаты MPI-версии совпали с эталоном NumPy (`A @ B`) для всех проверенных "
-                   f"конфигураций, максимальная относительная погрешность {max(r['max_rel_err'] for r in checked):.1e}.")
+        t = ("Распределённая версия на MPI корректна: результаты всех проверенных запусков совпали с эталоном NumPy "
+             f"(максимальная относительная погрешность {max(r['max_rel_err'] for r in checked):.1e}). ")
     elif checked:
-        out.append("1. **Корректность.** Для части конфигураций верификация НЕ пройдена - см. таблицу, нужно искать ошибку.")
+        t = "Для части конфигураций верификация НЕ пройдена — см. приложение. "
     else:
-        out.append("1. **Корректность.** Верификация в этом запуске не выполнялась (`NA`): проверьте выходные файлы "
-                   "командой `python3 tools/verify.py`.")
-    if not mpi:
-        return "\n".join(out)
-    best = max(mpi, key=lambda r: r["speedup"])
-    nmax = max(r["n"] for r in mpi)
-    pmax = max(r["threads"] for r in mpi)
-    big = next(r for r in mpi if r["n"] == nmax and r["threads"] == pmax)
-    out.append(f"2. **Ускорение.** Максимальное ускорение S = {best['speedup']:.2f} получено при N={best['n']} и "
-               f"{best['threads']} процессах (E = {best['efficiency']:.0%}). Для самой большой матрицы (N={nmax}) при "
-               f"{pmax} процессах S = {big['speedup']:.2f}, E = {big['efficiency']:.0%}.")
-    small_n = min(r["n"] for r in mpi)
-    small = next((r for r in mpi if r["n"] == small_n and r["threads"] == pmax), None)
-    if small and small_n != nmax:
-        out.append(f"3. **Влияние размера.** При {pmax} процессах для малой матрицы (N={small_n}) S = {small['speedup']:.2f}, "
-                   f"для большой (N={nmax}) S = {big['speedup']:.2f}: объём вычислений растёт как N^3, а пересылаемых "
-                   "данных - как N^2, поэтому чем больше N, тем меньше доля коммуникаций.")
-    out.append("4. **Коммуникации.** Каждый процесс получает всю матрицу B (`MPI_Bcast`) и свою часть A (`MPI_Scatterv`), "
-               "затем результат собирается `MPI_Gatherv`. Эти пересылки не ускоряются при росте числа процессов, "
-               "поэтому эффективность E падает с ростом P (закон Амдала); в замеры времени коммуникации включены.")
-    if cores_total and pmax > cores_total:
-        top = big
-        ref = next((r for r in mpi if r["n"] == nmax and r["threads"] == cores_total), None)
-        if ref:
-            out.append(f"5. **Процессов больше ядер.** При {pmax} процессах на {cores_total} ядрах S = {top['speedup']:.2f} против "
-                       f"{ref['speedup']:.2f} при {cores_total} процессах: лишние процессы делят ядра и ускорения не дают.")
-    else:
-        out.append("5. **Число ядер.** Ускорение растёт, пока число процессов не превышает число доступных ядер; "
-                   "при межузловых запусках на суперкомпьютере добавляется задержка сети, что видно по падению эффективности.")
-    return "\n".join(out)
+        t = "Верификация ещё не выполнялась (`NA`): запустите `python3 tools/verify_lab3.py`. "
+    t += f"Программа запущена на платформе: {where}. "
+    if len(d.P) > 1:
+        ps = d.P[1:]
+        t += (f"При N = {nmax} получено ускорение "
+              + ", ".join(f"{c(d.S(nmax, p))} на {p}" for p in ps)
+              + f" процессах (эффективность {c(d.E(nmax, d.pmax))} на {d.pmax}).")
+        t += openmp_comparison(d)
+    return t.strip()
 
 
-def write_report(rows, figs, args):
-    mpi = [r for r in rows if r["threads"] > 0]
-    sizes = ", ".join(str(n) for n in sorted({r["n"] for r in rows}))
-    procs = ", ".join(str(p) for p in sorted({r["threads"] for r in mpi}))
-    titles = {"time_vs_size.png": "Время от размера", "speedup_vs_procs.png": "Ускорение от числа процессов",
-              "efficiency_vs_procs.png": "Эффективность от числа процессов"}
-    fig_md = "\n\n".join(f"![{titles[f]}](figures/{f})" for f in figs)
-    device = args.platform or f"{device_name()} ({os.cpu_count()} логических ядер)"
+CODE = """```cpp
+// rank 0 прочитал A и B; всем процессам нужна B целиком, а A - только свои строки
+MPI_Bcast(B, N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+MPI_Scatterv(A, counts, displs, MPI_DOUBLE, localA, myRows * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+multiplyRows(localA, B, localC, N, myRows);          // тот же тройной цикл, что в л/р №1
+MPI_Gatherv(localC, myRows * N, MPI_DOUBLE, C, counts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+```"""
+
+
+def write_report(d, figs, args, env):
+    names = {"time_vs_size.png": "Время выполнения от размера матрицы для разного числа процессов",
+             "speedup_vs_procs.png": f"Ускорение S = T({d.p0}) / T(p) от числа процессов (пунктир — идеальное линейное)",
+             "efficiency_vs_procs.png": "Эффективность E = S / p от числа процессов для разных размеров матрицы",
+             "comm_share_vs_procs.png": "Доля времени на пересылки данных от числа процессов"}
+    texts = {"time_vs_size.png": text_fig1(d), "speedup_vs_procs.png": text_fig2(d),
+             "efficiency_vs_procs.png": text_fig3(d), "comm_share_vs_procs.png": text_fig4(d)}
+    headings = {"time_vs_size.png": "Время от размера матрицы", "speedup_vs_procs.png": "Ускорение от числа процессов",
+                "efficiency_vs_procs.png": "Эффективность от числа процессов",
+                "comm_share_vs_procs.png": "Доля коммуникаций"}
+    graphs = []
+    for i, f in enumerate(figs, 1):
+        block = f"### {headings[f]}\n\n![{names[f]}](figures/{f})\n\n*Рисунок {i} — {names[f]}*"
+        if texts[f]:
+            block += f"\n\n{texts[f]}"
+        graphs.append(block)
+
+    where = args.platform or (f"узел {env['host']}" if env.get("host") else "локальная машина")
+    env_lines = [f"- **Платформа:** {where}"]
+    if env.get("scheduler"):
+        env_lines.append(f"- **Планировщик:** {env['scheduler']}; узлы задачи: {env.get('nodes', '-')}")
+    env_lines.append(f"- **Процессор узла:** {env['cpu']} ({env['cores_per_node']} ядер в узле)")
+    if env.get("distro") or env.get("os"):
+        env_lines.append(f"- **ОС:** {env.get('distro') or ''} {('(' + env['os'] + ')') if env.get('os') else ''}".rstrip())
+    env_lines.append(f"- **MPI:** {env['mpi']}; запуск: `{env.get('mpirun', 'mpirun')}`")
+    env_lines.append(f"- **Компилятор:** {env['compiler']}, `mpicxx -O3`")
+    env_lines.append("- **Верификация/анализ:** Python 3, NumPy, Matplotlib (на своей машине)")
+
     text = f"""# Лабораторная работа №3
 
 ## Параллельное умножение квадратных матриц на MPI
@@ -167,85 +383,93 @@ def write_report(rows, figs, args):
 
 Модифицировать программу из л/р №1 для параллельной работы по технологии MPI.
 
-- Провести серию экспериментов с разными размерами матриц (примерно 200, 400, 800, 1200, 1600, 2000).
-- Использовать разное количество вычислительных ядер (1, 2, 4, 8 и т.д.).
+- Провести серию экспериментов с разными размерами матриц ({", ".join(str(n) for n in d.N)}).
+- Провести серию экспериментов с разным количеством вычислительных ядер ({", ".join(str(p) for p in d.P)} процессов).
 - Запустить параллельную версию на суперкомпьютере «Сергей Королёв».
 
 ## Среда выполнения
 
-- **Платформа:** {device}
-- **ОС:** {platform.platform()}
-- **MPI:** {mpi_version()}
-- **Компилятор:** {compiler_version()}, C++17
-- **Сборка:** CMake + Make (Release, `-O3`)
-- **Верификация/анализ:** Python 3, NumPy, Matplotlib
+{chr(10).join(env_lines)}
 
 ## Реализация
 
-В `src/main.cpp` добавлена стратегия **parallel_mpi** (функция `multiplyMPI`, запуск `mpirun -np P ./build/matmul <input> 0 mpi`):
+Код — `src/matmul_mpi.cpp` (формат входа/выхода и тройной цикл те же, что в л/р №1). Строки матрицы A распределяются
+между процессами (`MPI_Scatterv`), матрица B рассылается всем (`MPI_Bcast`), каждый процесс считает свои строки C,
+результат собирается на нулевом процессе (`MPI_Gatherv`). Число строк на процесс отличается не более чем на одну,
+поэтому N не обязано делиться на число процессов.
 
-1. Процесс 0 читает матрицы `A` и `B` из файла.
-2. `MPI_Bcast` рассылает матрицу `B` всем процессам.
-3. `MPI_Scatterv` раздаёт каждому процессу блок строк `A` (по `N/P` строк, остаток - первым процессам, поэтому `N` не обязано делиться на `P`).
-4. Каждый процесс вычисляет свои строки `C` тройным циклом (без библиотек).
-5. `MPI_Gatherv` собирает строки `C` на процессе 0, он записывает результат в файл.
+{CODE}
 
-Время замеряется `MPI_Wtime` между двумя `MPI_Barrier` и включает рассылку, вычисление и сбор данных (чтение и запись файлов не входят).
-В выходной файл дополнительно пишутся `compute_seconds` (максимум времени вычисления по процессам) и `comm_seconds`.
-Ускорение S = `T_sequential / T_p`, эффективность E = `S / p`; `T_sequential` - последовательная версия на том же размере.
+Время замеряется `MPI_Wtime` между двумя `MPI_Barrier` и включает все пересылки (чтение и запись файлов не входят).
+Отдельно замеряется время чистого вычисления (максимум по процессам), из него получается доля обменов.
+Программа написана на C++98 без сторонних библиотек, чтобы собираться старыми компиляторами кластера.
+
+Верификация — `tools/verify.py` (сравнение с `A @ B` из NumPy, допуск 1e-5, первый запуск каждой конфигурации).
+На кластере NumPy нет, поэтому туда передавались готовые входные матрицы, а оттуда — последовательный результат
+и MD5 всех выходных матриц: каждый элемент C вычисляется одним и тем же циклом, поэтому выход MPI побитово совпадает
+с последовательным, и проверка последовательного результата через NumPy распространяется на все конфигурации
+(`tools/verify_lab3.py`).
 
 ### Сборка и запуск
 
 ```bash
-mkdir build && cd build
-cmake ..
-make
-cd ..
+mpicxx -O3 -o build/matmul_mpi src/matmul_mpi.cpp            # или CMake: цель matmul_mpi
+mpirun -np 4 ./build/matmul_mpi data/input_200.txt           # 4 процесса
+mpirun -np 1 ./build/matmul_mpi data/input_200.txt seq       # последовательная версия
+python3 tools/verify.py data/input_200.txt data/output_200_parallel_mpi_t4.txt
 
-python3 tools/generate.py 500 data/input_500.txt     # генерация входных данных
-mpirun -np 4 ./build/matmul data/input_500.txt 0 mpi # 4 MPI-процесса
-python3 tools/verify.py data/input_500.txt data/output_500_parallel_mpi_t4.txt
-
-./tools/run_experiments_lab3.sh                      # локально: вся серия, графики, этот отчёт
-sbatch tools/slurm_lab3.sbatch                       # на суперкомпьютере (SLURM)
+./tools/run_experiments_lab3.sh                              # серия локально
+./tools/lab3_bundle.sh                                       # архив для кластера
+qsub tools/pbs_lab3.pbs                                      # серия на «Сергее Королёве» (Torque/PBS)
+python3 tools/verify_lab3.py && python3 tools/plot_lab3.py   # проверка и этот отчёт
 ```
 
 ## Эксперименты
 
-- Размеры N: {sizes}
-- Число MPI-процессов (1 процесс = 1 ядро): {procs}
-- Запусков на конфигурацию: {rows[0]['runs']}; в таблице среднее, минимум и стандартное отклонение σ.
+- Размеры N: {", ".join(str(n) for n in d.N)}
+- Число MPI-процессов (= ядер): {", ".join(str(p) for p in d.P)}; база — последовательная версия и MPI на 1 процессе
+- Запусков на конфигурацию: {d.runs}; в таблицах медиана, подробности (среднее, минимум, σ) — в приложении.
+
+{placement_text(d)}
 
 ## Результаты
 
-Исходные данные для графиков (то же в `data/results_lab3.csv`, по запускам):
+Время (медиана), ускорение S = T({d.p0}) / T(p) и эффективность E = S / p (данные — `data/results_lab3.csv`):
 
-{table(rows)}
+{wide_table(d)}
 
-{fig_md}
+{text_table(d)}
 
-## Верификация
+## Графики
 
-Результат первого запуска каждой конфигурации сравнивался с `A @ B` из NumPy. Допуск - `1e-5` относительно `|A|@|B|`
-(программа выводит числа с 6 значащими цифрами, порядок суммирования различается).
+{chr(10).join(chr(10) + b + chr(10) for b in graphs).strip()}
 
 ## Выводы
 
-{conclusions(rows, args.cores_total)}
+{text_conclusion(d, where)}
+
+## Приложение. Подробные данные
+
+{detail_table(d)}
 """
-    with open(os.path.join(REPORT, "README.md"), "w", encoding="utf-8") as f:
+    with open(os.path.join(REPORT, "README.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-report", action="store_true")
-    ap.add_argument("--platform", default="", help="текст про платформу, например название суперкомпьютера")
-    ap.add_argument("--cores-total", type=int, default=os.cpu_count() or 0, help="число доступных ядер")
+    ap.add_argument("--platform", default="", help="платформа замеров, например: суперкомпьютер «Сергей Королёв»")
     args = ap.parse_args()
-    rows = aggregate(RES)
-    figs = make_plots(rows, args.cores_total)
+    env = load_env()
+    comp, nodes = load_extra()
+    d = Data(aggregate(RES), comp, nodes)
+    try:
+        cpn = int(env.get("cores_per_node") or 0)
+    except ValueError:
+        cpn = 0
+    figs = make_plots(d, cpn)
     if not args.skip_report:
         os.makedirs(REPORT, exist_ok=True)
-        write_report(rows, figs, args)
+        write_report(d, figs, args, env)
     print("Готово: report/lab3/figures/" + ("" if args.skip_report else " и README.md"))

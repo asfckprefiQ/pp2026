@@ -1,0 +1,20 @@
+#!/bin/bash
+# Лаба 3: короткая пробная задача (1-2 минуты) - проверить сборку, mpirun и размещение процессов
+# на двух узлах перед полной серией.
+#   qsub tools/pbs_lab3_test.pbs   ->   cat matmul_test.o<id>
+#PBS -N matmul_test
+#PBS -l nodes=2:ppn=8
+#PBS -l walltime=00:10:00
+#PBS -j oe
+##PBS -A <код_проекта>
+
+cd "$PBS_O_WORKDIR"
+[ -f /etc/profile.d/modules.sh ] && . /etc/profile.d/modules.sh   # команда module в пакетном режиме
+module load impi/4 2>/dev/null && export MPIRUN_ARGS="-r ssh"
+# module load openmpi
+export I_MPI_FALLBACK_DEVICE=${I_MPI_FALLBACK_DEVICE:-enable}
+
+echo "Узлы задачи:"; sort "$PBS_NODEFILE" | uniq -c
+export PROCS="1 2 8 16" SIZES="200 400" RUNS=1
+bash tools/run_experiments_lab3.sh
+cat data/results_lab3.csv

@@ -30,13 +30,14 @@ endif()
 find_package(OpenMP REQUIRED)
 target_link_libraries(matmul PRIVATE OpenMP::OpenMP_CXX)
 
-# Лаба 3: MPI (необязателен: без него собираются лабы 1-2)
+# Лаба 3: MPI - отдельная программа matmul_mpi (C++98, чтобы собиралась и старыми mpicxx на кластере).
+# Необязательна: без MPI собираются остальные лабы. На кластере собирается без CMake: mpicxx -O3 src/matmul_mpi.cpp
 find_package(MPI COMPONENTS CXX)
 if(MPI_CXX_FOUND)
-    target_link_libraries(matmul PRIVATE MPI::MPI_CXX)
-    target_compile_definitions(matmul PRIVATE USE_MPI)
+    add_executable(matmul_mpi src/matmul_mpi.cpp)
+    target_link_libraries(matmul_mpi PRIVATE MPI::MPI_CXX)
 else()
-    message(STATUS "MPI не найден: backend mpi будет недоступен")
+    message(STATUS "MPI не найден: программа matmul_mpi (лаба 3) не будет собрана")
 endif()
 
 # Лаба 4: CUDA (необязательна: без nvcc собираются лабы 1-3)

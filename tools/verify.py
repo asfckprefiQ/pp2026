@@ -5,6 +5,7 @@
 Код возврата: 0 - верно, 1 - расхождение, 2 - ошибка аргументов.
 Допуск 1e-5 (относительно |A|@|B|): программа выводит числа с 6 значащими цифрами.
 """
+import gzip
 import os
 import sys
 from itertools import islice
@@ -24,7 +25,8 @@ def load_input(path):
 
 
 def load_output(path):
-    with open(path) as f:
+    opener = gzip.open if path.endswith(".gz") else open  # лаба 3: результаты с кластера сжаты gzip
+    with opener(path, "rt") as f:
         n = int(f.readline())
         c = np.loadtxt(islice(f, n), dtype=np.float64, ndmin=2)  # дальше - строки метаданных
     assert c.shape == (n, n), f"{path}: ожидалось {n}x{n}, получено {c.shape}"

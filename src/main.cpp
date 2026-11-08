@@ -8,10 +8,6 @@
 
 #include <omp.h>
 
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
-
 #ifdef USE_CUDA
 #include "cuda_matmul.h"
 #endif
@@ -67,61 +63,12 @@ void multiplyOpenMP(const Matrix& A, const Matrix& B, Matrix& C, int N, int T) {
     }
 }
 
-#ifdef USE_MPI
-// Лаба 3 (MPI): распределение строк матрицы A между процессами.
-// Схема: rank 0 читает A и B -> Bcast(B) всем -> Scatterv(строки A) -> каждый процесс считает свои строки C
-//        -> Gatherv(строки C) на rank 0. Работает при любом N и P (N не обязано делиться на P).
-// Возвращает полное время (раздача + вычисление + сбор); computeSeconds - максимум времени вычисления по процессам.
-double multiplyMPI(const std::vector<double>& A, std::vector<double>& B, std::vector<double>& C,
-                   int N, int rank, int size, double& computeSeconds) {
-    std::vector<int> rows(size), sendCounts(size), displs(size), recvCounts(size), recvDispls(size);
-    int base = N / size, rest = N % size, off = 0;
-    for (int r = 0; r < size; ++r) {
-        rows[r] = base + (r < rest ? 1 : 0);
-        sendCounts[r] = rows[r] * N;
-        displs[r] = off * N;
-        off += rows[r];
-    }
-    recvCounts = sendCounts;
-    recvDispls = displs;
-    int myRows = rows[rank];
-
-    std::vector<double> localA((size_t)myRows * N), localC((size_t)myRows * N, 0.0);
-    if (rank != 0) B.assign((size_t)N * N, 0.0);
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    double t0 = MPI_Wtime();
-
-    MPI_Bcast(B.data(), N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Scatterv(A.data(), sendCounts.data(), displs.data(), MPI_DOUBLE,
-                 localA.data(), myRows * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-    double c0 = MPI_Wtime();
-    for (int i = 0; i < myRows; ++i)
-        for (int j = 0; j < N; ++j) {
-            double sum = 0.0;
-            for (int k = 0; k < N; ++k)
-                sum += localA[(size_t)i * N + k] * B[(size_t)k * N + j];
-            localC[(size_t)i * N + j] = sum;
-        }
-    double myCompute = MPI_Wtime() - c0;
-
-    MPI_Gatherv(localC.data(), myRows * N, MPI_DOUBLE, C.data(), recvCounts.data(), recvDispls.data(),
-                MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Barrier(MPI_COMM_WORLD);
-    double total = MPI_Wtime() - t0;
-
-    MPI_Reduce(&myCompute, &computeSeconds, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-    return total;
-}
-#endif
-
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Использование: ./matmul <input_file> [threads] [backend]\n";
         std::cerr << "  threads=0 или не указан -> последовательная версия\n";
-        std::cerr << "  backend: std (по умолчанию, std::thread) | omp (OpenMP) | mpi (запускать через mpirun -np P)\n";
-        std::cerr << "  mpi: mpirun -np P ./matmul <input_file> 0 mpi   (число процессов задаёт mpirun, threads игнорируется)\n";
+        std::cerr << "  backend: std (по умолчанию, std::thread) | omp (OpenMP) | cuda\n";
+        std::cerr << "  MPI (лаба 3) - отдельная программа: mpirun -np P ./build/matmul_mpi <input_file> [mpi|seq]\n";
         std::cerr << "  cuda: ./matmul <input_file> <block> cuda [naive|tiled]   (block = сторона блока потоков, по умолчанию tiled)\n";
         return 1;
     }
@@ -196,70 +143,6 @@ int main(int argc, char** argv) {
 #endif
     }
 
-    if (backend == "mpi") {
-#ifdef USE_MPI
-        MPI_Init(&argc, &argv);
-        int rank, size;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-        int N = 0;
-        Matrix A2, B2;
-        std::vector<double> A, B, C;
-        if (rank == 0) {
-            std::ifstream in(argv[1]);
-            if (!in) {
-                std::cerr << "Не могу открыть файл: " << argv[1] << "\n";
-                MPI_Abort(MPI_COMM_WORLD, 1);
-            }
-            in >> N;
-            A2 = readMatrix(in, N);
-            B2 = readMatrix(in, N);
-            A.resize((size_t)N * N);
-            B.resize((size_t)N * N);
-            C.assign((size_t)N * N, 0.0);
-            for (int i = 0; i < N; ++i)
-                for (int j = 0; j < N; ++j) {
-                    A[(size_t)i * N + j] = A2[i][j];
-                    B[(size_t)i * N + j] = B2[i][j];
-                }
-        }
-        MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-        double computeSeconds = 0.0;
-        double seconds = multiplyMPI(A, B, C, N, rank, size, computeSeconds);
-
-        if (rank == 0) {
-            std::string strategy = "parallel_mpi";
-            unsigned int coresAvailable = std::thread::hardware_concurrency();
-            std::string outputPath = "data/output_" + std::to_string(N) + "_" + strategy + "_t" + std::to_string(size) + ".txt";
-            std::ofstream out(outputPath);
-            if (!out) {
-                std::cerr << "Не могу записать файл: " << outputPath << " (создайте папку data/)\n";
-                MPI_Abort(MPI_COMM_WORLD, 1);
-            }
-            out << N << "\n";
-            for (int i = 0; i < N; ++i) {
-                for (int j = 0; j < N; ++j) out << C[(size_t)i * N + j] << " ";
-                out << "\n";
-            }
-            out << "strategy " << strategy << "\n";
-            out << "threads " << size << "\n";   // здесь «threads» = число MPI-процессов
-            out << "cores_available " << coresAvailable << "\n";
-            out << "time_seconds " << seconds << "\n";
-            out << "compute_seconds " << computeSeconds << "\n";
-            out << "comm_seconds " << (seconds - computeSeconds) << "\n";
-            std::cout << "N=" << N << " strategy=" << strategy << " processes=" << size
-                      << " time=" << seconds << "s (compute=" << computeSeconds << "s)\n";
-        }
-        MPI_Finalize();
-        return 0;
-#else
-        std::cerr << "Программа собрана без MPI (нет пакета MPI при сборке). Установите libopenmpi-dev и пересоберите.\n";
-        return 1;
-#endif
-    }
-
     std::ifstream in(argv[1]);
     if (!in) {
         std::cerr << "Не могу открыть файл: " << argv[1] << "\n";
@@ -268,7 +151,7 @@ int main(int argc, char** argv) {
 
     int T = (argc >= 3) ? std::stoi(argv[2]) : 0;
     if (T > 0 && backend != "std" && backend != "omp") {
-        std::cerr << "Неизвестный backend '" << backend << "' (допустимо: std, omp, mpi, cuda)\n";
+        std::cerr << "Неизвестный backend '" << backend << "' (допустимо: std, omp, cuda; MPI - программа matmul_mpi)\n";
         return 1;
     }
 

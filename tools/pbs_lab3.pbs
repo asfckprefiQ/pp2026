@@ -1,0 +1,29 @@
+#!/bin/bash
+# Лаба 3: полная серия на суперкомпьютере «Сергей Королёв» (Torque/PBS + Moab).
+#   qsub tools/pbs_lab3.pbs            (из корня распакованного архива, см. tools/lab3_bundle.sh)
+#   qstat -a  /  checkjob -v <id>      - состояние;  результат - в файле matmul_mpi.o<id>
+#
+# Перед запуском проверьте на кластере и при необходимости поправьте строки ниже:
+#   module avail                       - имена модулей MPI (impi/4, openmpi ...)
+#   glsaccount                         - код проекта для строки "#PBS -A"
+#   showbf                             - сколько узлов/ядер свободно сейчас
+# 4 узла x 8 ядер = 32 процесса: P = 1, 2, 4, 8 - на одном узле, 16 - на двух, 32 - на четырёх.
+#PBS -N matmul_mpi
+#PBS -l nodes=4:ppn=8
+#PBS -l walltime=02:00:00
+#PBS -j oe
+##PBS -A <код_проекта>
+
+cd "$PBS_O_WORKDIR"
+[ -f /etc/profile.d/modules.sh ] && . /etc/profile.d/modules.sh   # команда module в пакетном режиме
+
+# --- окружение MPI (выберите одно) ---
+module load impi/4 2>/dev/null && export MPIRUN_ARGS="-r ssh"   # Intel MPI 4 (как в инструкции hpc.ssau.ru)
+# module load openmpi                                         # либо Open MPI
+export I_MPI_FALLBACK_DEVICE=${I_MPI_FALLBACK_DEVICE:-enable}
+
+export PROCS=${PROCS:-"1 2 4 8 16 32"}
+export SIZES=${SIZES:-"200 400 800 1200 1600 2000"}
+export RUNS=${RUNS:-3}
+
+bash tools/run_experiments_lab3.sh
