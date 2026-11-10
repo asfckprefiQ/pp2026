@@ -1,4 +1,5 @@
 # Скрипты запускаются на Linux (WSL, кластер): только LF
 *.sh text eol=lf
 *.pbs text eol=lf
+*.sbatch text eol=lf
 *.py text eol=lf

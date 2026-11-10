@@ -9,10 +9,7 @@
 ##PBS -A <код_проекта>
 
 cd "$PBS_O_WORKDIR"
-[ -f /etc/profile.d/modules.sh ] && . /etc/profile.d/modules.sh   # команда module в пакетном режиме
-module load impi/4 2>/dev/null && export MPIRUN_ARGS="-r ssh"
-# module load openmpi
-export I_MPI_FALLBACK_DEVICE=${I_MPI_FALLBACK_DEVICE:-enable}
+. tools/cluster_env_lab3.sh
 
 echo "Узлы задачи:"; sort "$PBS_NODEFILE" | uniq -c
 export PROCS="1 2 8 16" SIZES="200 400" RUNS=1

@@ -3,7 +3,8 @@
 #
 #   ./tools/run_experiments_lab3.sh                                  # локально: P = 1, 2, 4, 8... до числа ядер
 #   PROCS="1 2 4" SIZES="200 400" RUNS=1 ./tools/run_experiments_lab3.sh
-#   qsub tools/pbs_lab3.pbs                                          # суперкомпьютер «Сергей Королёв» (Torque/PBS)
+#   sbatch tools/slurm_lab3.sbatch                                   # суперкомпьютер «Сергей Королёв» (SLURM)
+#   qsub tools/pbs_lab3.pbs                                          # то же, если там Torque/PBS
 #
 # Переменные окружения:
 #   SIZES, PROCS, RUNS        - размеры, числа процессов, повторы (по умолчанию 200..2000, 1 2 4 8.., 3)
@@ -12,8 +13,8 @@
 #   PYTHON                    - интерпретатор для верификации (python3); без NumPy верификация откладывается
 #   KEEP=1                    - не удалять выходные матрицы
 #
-# Для каждого N: sequential (база), затем MPI с P процессами. Внутри PBS-задания процессы размещаются по
-# первым P строкам $PBS_NODEFILE (P <= ppn - один узел, больше - несколько узлов).
+# Для каждого N: sequential (база), затем MPI с P процессами. Внутри задания SLURM или PBS процессы размещаются
+# по первым P строкам списка слотов задания (P <= ядер узла - один узел, больше - несколько узлов).
 # Результаты: data/results_lab3.csv, сведения о платформе: data/env_lab3.txt.
 #
 # Верификация: выход первого запуска каждой конфигурации сравнивается с A @ B из NumPy (tools/verify.py).
@@ -34,8 +35,27 @@ RESULTS=data/results_lab3.csv
 ENVF=data/env_lab3.txt
 OUTDIR=data/lab3_out
 
+mkdir -p build data "$OUTDIR"
+
+# Список слотов задания (имя узла на каждый процесс): PBS - $PBS_NODEFILE, SLURM - строится из списка узлов
+# и SLURM_TASKS_PER_NODE (вида "8(x4)" или "8,4": число задач на каждом узле)
+NODEFILE=""
+SCHED=""
 if [ -n "${PBS_NODEFILE:-}" ] && [ -f "${PBS_NODEFILE:-}" ]; then
-    SLOTS=$(wc -l < "$PBS_NODEFILE" | tr -d ' ')
+    NODEFILE=$PBS_NODEFILE
+    SCHED="Torque/PBS, job ${PBS_JOBID:-?}"
+elif [ -n "${SLURM_JOB_ID:-}" ] && command -v scontrol > /dev/null 2>&1; then
+    NODEFILE=$OUTDIR/slurm_nodes
+    scontrol show hostnames "${SLURM_JOB_NODELIST:-${SLURM_NODELIST:-}}" > "$OUTDIR/slurm_hosts"
+    echo "${SLURM_TASKS_PER_NODE:-1}" | tr ',' '\n' | awk '{
+        if (match($0, /\(x[0-9]+\)/)) { n = substr($0, RSTART + 2, RLENGTH - 3); c = substr($0, 1, RSTART - 1) }
+        else { n = 1; c = $0 }
+        for (i = 0; i < n; i++) print c }' > "$OUTDIR/slurm_counts"
+    paste "$OUTDIR/slurm_hosts" "$OUTDIR/slurm_counts" | awk '{ for (i = 0; i < $2; i++) print $1 }' > "$NODEFILE"
+    SCHED="SLURM, job $SLURM_JOB_ID"
+fi
+if [ -n "$NODEFILE" ]; then
+    SLOTS=$(wc -l < "$NODEFILE" | tr -d ' ')
 else
     SLOTS=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 fi
@@ -48,17 +68,25 @@ default_list() {
 }
 PROCS=${PROCS:-$(default_list)}
 
-mkdir -p build data "$OUTDIR"
-
 # Сборка: только mpicxx, без CMake (на кластере CMake может не быть или быть старым)
+if ! command -v "$MPICXX" > /dev/null 2>&1 && command -v mpiicpc > /dev/null 2>&1; then MPICXX=mpiicpc; fi
+if ! command -v "$MPICXX" > /dev/null 2>&1; then
+    echo "Не найден компилятор MPI ($MPICXX). Загрузите модуль: module avail 2>&1 | grep -i mpi; module load <имя>" >&2
+    exit 1
+fi
 if [ ! -x "$BIN" ] || [ src/matmul_mpi.cpp -nt "$BIN" ]; then
     echo "Сборка: $MPICXX -O3 -o $BIN src/matmul_mpi.cpp"
-    $MPICXX -O3 -o "$BIN" src/matmul_mpi.cpp
+    if ! $MPICXX -O3 -o "$BIN" src/matmul_mpi.cpp; then
+        # «Сергей Королёв»: на вычислительных узлах нет системных заголовков (stdio.h), собирать надо на узле входа
+        echo "Сборка не удалась. На кластере соберите на узле входа и поставьте задачу снова:" >&2
+        echo "  module load intel/mpi5 && mkdir -p build && mpicxx -O3 -o $BIN src/matmul_mpi.cpp" >&2
+        exit 1
+    fi
 fi
 
-# Open MPI (новые версии) не даёт запускать больше процессов, чем ядер, без --oversubscribe (только вне PBS)
+# Open MPI (новые версии) не даёт запускать больше процессов, чем ядер, без --oversubscribe (только вне заданий)
 EXTRA=""
-if [ -z "${PBS_NODEFILE:-}" ] && $MPIRUN --version 2>&1 | grep -qi "open mpi" \
+if [ -z "$NODEFILE" ] && $MPIRUN --version 2>&1 | grep -qi "open mpi" \
         && $MPIRUN --help 2>&1 | grep -q oversubscribe; then
     EXTRA="--oversubscribe"
 fi
@@ -78,9 +106,9 @@ if $PYTHON -c "import sys, numpy; sys.exit(0 if sys.version_info >= (3, 6) else 
     echo "compiler: $($MPICXX --version 2>&1 | head -1)"
     echo "mpi: $( ($MPIRUN --version 2>&1 || $MPIRUN -V 2>&1) | grep -v '^$' | head -1)"
     echo "mpirun: $MPIRUN $MPIRUN_ARGS"
-    if [ -n "${PBS_NODEFILE:-}" ]; then
-        echo "scheduler: Torque/PBS, job ${PBS_JOBID:-?}"
-        echo "nodes: $(sort -u "$PBS_NODEFILE" | tr '\n' ' ')"
+    if [ -n "$NODEFILE" ]; then
+        echo "scheduler: $SCHED"
+        echo "nodes: $(sort -u "$NODEFILE" | tr '\n' ' ')"
         echo "slots: $SLOTS"
     fi
 } > "$ENVF"
@@ -88,9 +116,9 @@ echo "--- платформа ($ENVF) ---"; cat "$ENVF"; echo "------------------
 
 launch() {   # launch P команда...
     local P=$1; shift
-    if [ -n "${PBS_NODEFILE:-}" ]; then
+    if [ -n "$NODEFILE" ]; then
         if [ "$P" -gt "$SLOTS" ]; then echo "P=$P больше выделенных слотов ($SLOTS)" >&2; return 1; fi
-        head -n "$P" "$PBS_NODEFILE" > "$OUTDIR/hosts_$P"
+        head -n "$P" "$NODEFILE" > "$OUTDIR/hosts_$P"
         $MPIRUN $MPIRUN_ARGS -machinefile "$OUTDIR/hosts_$P" -np "$P" "$@"
     else
         $MPIRUN $MPIRUN_ARGS $EXTRA -np "$P" "$@"
@@ -106,7 +134,7 @@ echo "Слотов: $SLOTS; процессы MPI: $PROCS; размеры: $SIZES
 
 # run_cfg N P   (P=0 - sequential, запускается как 1 процесс)
 run_cfg() {
-    local N=$1 P=$2 IN=data/input_${1}.txt NP MODE TAG STRAT OUT DEST LINE TIME COMP NODES VERIFIED REL VOUT SUM r
+    local N=$1 P=$2 IN=data/input_${1}.txt NP MODE TAG STRAT OUT DEST LINE TIME COMP NODES VERIFIED REL VOUT SUM SUM1="" r
     if [ "$P" -eq 0 ]; then NP=1; MODE=seq; STRAT=sequential; TAG=sequential
     else NP=$P; MODE=mpi; STRAT=parallel_mpi; TAG=parallel_mpi_t$P; fi
     OUT=$OUTDIR/output_${N}_${TAG}.txt
@@ -124,12 +152,13 @@ run_cfg() {
             fi
         fi
         echo "$N,$STRAT,$P,$P,$r,$TIME,$VERIFIED,$REL,$COMP,$NODES,$SUM" >> "$RESULTS"
+        if [ "$r" -eq 1 ]; then SUM1=$SUM; fi
     done
     echo "  N=$N P=$P ($TAG, узлов: $NODES): последний запуск ${TIME}s"
     # Без NumPy сохраняем последовательный результат (и MPI-результат, если он вдруг отличается) для проверки позже.
     if [ "${KEEP:-0}" = "1" ]; then
         :
-    elif [ "$HAVE_NUMPY" -eq 0 ] && { [ "$P" -eq 0 ] || [ "$SUM" != "$(md5of_seq "$N")" ]; }; then
+    elif [ "$HAVE_NUMPY" -eq 0 ] && { [ "$P" -eq 0 ] || [ "$SUM1" != "$(md5of_seq "$N")" ]; }; then
         gzip -f "$OUT"
     else
         rm -f "$OUT"

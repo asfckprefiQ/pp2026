@@ -1,5 +1,6 @@
 #!/bin/bash
-# Лаба 3: полная серия на суперкомпьютере «Сергей Королёв» (Torque/PBS + Moab).
+# Лаба 3: полная серия на суперкомпьютере «Сергей Королёв», вариант для Torque/PBS + Moab
+# (по старой инструкции hpc.ssau.ru; если на кластере есть sbatch - используйте tools/slurm_lab3.sbatch).
 #   qsub tools/pbs_lab3.pbs            (из корня распакованного архива, см. tools/lab3_bundle.sh)
 #   qstat -a  /  checkjob -v <id>      - состояние;  результат - в файле matmul_mpi.o<id>
 #
@@ -15,12 +16,7 @@
 ##PBS -A <код_проекта>
 
 cd "$PBS_O_WORKDIR"
-[ -f /etc/profile.d/modules.sh ] && . /etc/profile.d/modules.sh   # команда module в пакетном режиме
-
-# --- окружение MPI (выберите одно) ---
-module load impi/4 2>/dev/null && export MPIRUN_ARGS="-r ssh"   # Intel MPI 4 (как в инструкции hpc.ssau.ru)
-# module load openmpi                                         # либо Open MPI
-export I_MPI_FALLBACK_DEVICE=${I_MPI_FALLBACK_DEVICE:-enable}
+. tools/cluster_env_lab3.sh                                 # модуль MPI (impi/4, openmpi ...)
 
 export PROCS=${PROCS:-"1 2 4 8 16 32"}
 export SIZES=${SIZES:-"200 400 800 1200 1600 2000"}

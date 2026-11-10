@@ -13,6 +13,7 @@ data/lab3_out/
 
 # лаба 3: архив для суперкомпьютера и логи PBS
 lab3_bundle.tar.gz
+lab3_results.tar.gz
 *.o[0-9]*
 *.e[0-9]*
 
@@ -20,3 +21,4 @@ lab3_bundle.tar.gz
 __pycache__/
 *.pyc
 *Zone.Identifier
+matmul_*-*.out

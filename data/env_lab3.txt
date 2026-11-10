@@ -1,0 +1,13 @@
+host: n239.ssc
+date: 2026-11-10 17:43
+os: Linux 3.10.0-1160.el7.x86_64
+distro: CentOS Linux release 7.9.2009 (Core)
+distro: CentOS Linux 7 (Core)
+cpu: Intel(R) Xeon(R) CPU X5670 @ 2.93GHz
+cores_per_node: 12
+compiler: g++ (GCC) 4.8.5 20150623 (Red Hat 4.8.5-44)
+mpi: Intel(R) MPI Library for Linux* OS, Version 5.1.3 Build 20160120 (build id: 14053)
+mpirun: mpirun -r ssh
+scheduler: SLURM, job 344851
+nodes: n239 n242 n246 n249 
+slots: 32

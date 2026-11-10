@@ -18,7 +18,7 @@
 - `src/matmul_mpi.cpp` — MPI-версия (лаба 3), переносимый C++98 для старых компиляторов кластера
 - `src/cuda_matmul.cu`, `src/cuda_matmul.h` — CUDA-ядра (naive и tiled) и их вызов с хоста
 - `asst1/prog1_mandelbrot_threads` — Program 1 из asst1 (лаба 5)
-- `tools/` — генерация данных, верификация, серии экспериментов, графики и отчёты, PBS-скрипты для кластера
+- `tools/` — генерация данных, верификация, серии экспериментов, графики и отчёты, скрипты заданий для кластера (SLURM и PBS)
 - `data/` — результаты замеров: `results.csv` (лаба 1), `results_lab2.csv`, `results_lab3.csv` и `env_lab3.txt`,
   `results_lab4.csv` и `device_lab4.txt`, `results_lab5.csv`; входные матрицы `input_*.txt` в git не хранятся
   (генерируются `tools/generate.py`)
@@ -61,16 +61,18 @@ bash tools/run_experiments_lab5.sh && python3 tools/plot_lab5.py   # лаба 5
 
 ### Лаба 3 на суперкомпьютере «Сергей Королёв»
 
-Кластер использует Torque/PBS (`qsub`), вход — `sk.ssau.ru`. NumPy на кластере не требуется: входные матрицы
-готовятся здесь, а проверка выполняется после копирования результатов обратно.
+Вход — `sk.ssau.ru` (только из сети университета или через его VPN), задания ставятся через SLURM (`sbatch`);
+для Torque/PBS (`qsub`) есть `tools/pbs_lab3*.pbs`. NumPy на кластере не требуется: входные матрицы
+готовятся здесь, а проверка выполняется после копирования результатов обратно. Пошаговая инструкция —
+[docs/lab3_cluster.md](docs/lab3_cluster.md).
 
 ```bash
 ./tools/lab3_bundle.sh                                    # lab3_bundle.tar.gz: исходник, скрипты, входные матрицы
 scp lab3_bundle.tar.gz <логин>@sk.ssau.ru:
 # на кластере:
 mkdir -p pp2026 && tar xzf lab3_bundle.tar.gz -C pp2026 && cd pp2026
-qsub tools/pbs_lab3_test.pbs                              # пробная задача на 1-2 минуты
-qsub tools/pbs_lab3.pbs                                   # полная серия: 1..32 процесса, N = 200..2000
+sbatch tools/slurm_lab3_test.sbatch                       # пробная задача на 1-2 минуты
+sbatch tools/slurm_lab3.sbatch                            # полная серия: 1..32 процесса, N = 200..2000
 # обратно на свою машину:
 scp -r <логин>@sk.ssau.ru:pp2026/data/results_lab3.csv <логин>@sk.ssau.ru:pp2026/data/env_lab3.txt data/
 scp -r <логин>@sk.ssau.ru:pp2026/data/lab3_out data/

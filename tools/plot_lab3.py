@@ -110,6 +110,12 @@ class Data:
         vals = {v for (n, q), v in self.nodes.items() if q == p}
         return max(vals) if vals else None
 
+    def E_comp(self, n, p):
+        """Эффективность только вычислительной части (без пересылок): t_выч(1) / (p * t_выч(p))."""
+        if (n, self.p0) not in self.comp or (n, p) not in self.comp:
+            return None
+        return self.comp[(n, self.p0)] / ((p / self.p0) * self.comp[(n, p)])
+
 
 def save(name):
     plt.tight_layout()
@@ -136,7 +142,11 @@ def make_plots(d, cores_per_node):
         for n in d.N:
             plt.plot(d.P, [d.S(n, p) for p in d.P], "o-", label=f"N={n}")
         plt.plot(d.P, [p / d.p0 for p in d.P], "k--", label="идеальное линейное")
-        if cores_per_node and d.p0 < cores_per_node < d.pmax:
+        one_node = [p for p in d.P if d.nodes_for(p) == 1]
+        if one_node and (d.nodes_for(d.pmax) or 1) > 1:   # реальная граница одного узла в этом запуске
+            plt.axvline(one_node[-1], color="gray", ls=":",
+                        label=f"до {one_node[-1]} процессов — один узел, дальше несколько")
+        elif cores_per_node and d.p0 < cores_per_node < d.pmax:
             plt.axvline(cores_per_node, color="gray", ls=":", label=f"ядер в узле: {cores_per_node}")
         plt.xlabel("Число MPI-процессов"); plt.ylabel(f"Ускорение S = T({d.p0}) / T(p)"); plt.grid(True)
         plt.legend(fontsize=8)
@@ -220,17 +230,58 @@ def text_table(d):
         parts.append(f"На {p} процессах S = {span([d.S(n, p) for n in d.N])}, эффективность "
                      f"{span([d.E(n, p) for n in d.N])}.")
     es = [d.E(n, d.pmax) for n in d.N]
-    multi = (d.nodes_for(d.pmax) or 1) > 1
-    parts.append(f"На {d.pmax} процессах эффективность равна {span(es)}"
-                 + (": она падает" if min(es) < 0.9 else ": потери невелики")
-                 + ", потому что рассылка матрицы B (`MPI_Bcast`) и сбор результата (`MPI_Gatherv`) не ускоряются с ростом числа "
-                   "процессов, а объём вычислений на каждый процесс уменьшается"
-                 + ("; при размещении на нескольких узлах данные идут по сети InfiniBand, а не через общую память." if multi
-                    else "; кроме того, процессы одного узла делят пропускную способность памяти."))
+    parts.append(f"На {d.pmax} процессах эффективность равна {span(es)}.")
+    parts.append(bottleneck_text(d))
     nmax = d.N[-1]
     g0, g1 = d.gflops(nmax, d.p0), d.gflops(nmax, d.pmax)
     parts.append(f"Производительность при N = {nmax} {'выросла' if g1 > g0 else 'изменилась'} с ≈{c(g0, 2)} GFLOPS на {d.p0} процессе "
                  f"до ≈{c(g1, 2)} GFLOPS на {d.pmax} процессах.")
+    return " ".join(parts)
+
+
+def bottleneck_text(d):
+    """Откуда потери эффективности: пересылки (малые N) или вычислительная часть внутри узла (большие N).
+    Строится по измеренной доле обменов и по времени вычислений, без предположений о железе."""
+    if not d.comp or len(d.P) < 2:
+        return ""
+    parts = []
+    shares = {n: d.comm_share(n, d.pmax) for n in d.N}
+    if any(v is None for v in shares.values()):
+        return ""
+    small = [n for n in d.N if shares[n] >= 0.2]
+    big = [n for n in d.N if shares[n] < 0.12]
+    if small:
+        parts.append(f"При малых N потери дают пересылки: при N = {', '.join(str(n) for n in small)} на {d.pmax} процессах "
+                     f"обмены (`MPI_Bcast` матрицы B, `MPI_Scatterv`, `MPI_Gatherv`) занимают "
+                     f"{c(100 * min(shares[n] for n in small), 1)}–{c(100 * max(shares[n] for n in small), 1)} % времени, "
+                     "а вычислений на процесс почти нет.")
+    if not big:
+        return " ".join(parts)
+    parts.append(f"При N ≥ {big[0]} пересылки занимают не больше {c(100 * max(shares[n] for n in big), 1)} % времени, "
+                 "и основная потеря — в самой вычислительной части.")
+    single = [p for p in d.P if d.nodes_for(p) == 1 and p > d.p0]
+    if single:
+        ps = single[-1]
+        ec = [d.E_comp(n, ps) for n in big if d.E_comp(n, ps) is not None]
+        if ec:
+            parts.append(f"На одном узле при {ps} процессах эффективность одних только вычислений (без пересылок) равна "
+                         f"{span(ec)}: процессы одного узла делят его память и кэш, а тройной цикл ограничен скоростью "
+                         "обращений к памяти, а не арифметикой.")
+        g_small = d.gflops(d.N[0], d.p0)
+        g_big = [d.gflops(n, d.p0) for n in d.N if n >= 1600] or [d.gflops(d.N[-1], d.p0)]
+        if g_small > 1.3 * max(g_big):
+            parts.append(f"Это видно и на одном процессе: {c(g_small)} GFLOPS при N = {d.N[0]}, когда матрицы почти "
+                         f"целиком в кэше, и {span(g_big)} GFLOPS при N ≥ 1600.")
+        steps = []
+        for a, b in zip(d.P, d.P[1:]):
+            ka, kb = d.nodes_for(a) or 1, d.nodes_for(b) or 1
+            if a >= ps and kb > ka:
+                r = [d.comp[(n, a)] / d.comp[(n, b)] for n in big if (n, a) in d.comp and (n, b) in d.comp]
+                if r:
+                    steps.append(f"{a}→{b} (с {ka} на {kb} узла) — в {span(r)} раза")
+        if steps:
+            parts.append("Когда процессы добавляются вместе с новыми узлами, каждый узел приносит свою память, и время "
+                         "вычислений сокращается почти ровно пропорционально: " + ", ".join(steps) + ".")
     return " ".join(parts)
 
 
@@ -261,7 +312,13 @@ def text_fig2(d):
     txt = f"При N = {nmax} ускорение составляет {vals} процессах (идеал — равное числу процессов)."
     eff = [d.E(nmax, p) for p in ps]
     if eff[-1] < 0.85:
-        txt += f" Отставание от идеала растёт с числом процессов (эффективность {c(eff[-1])} на {ps[-1]}) — это накладные расходы на коммуникации."
+        share = d.comm_share(nmax, ps[-1]) if d.comp else None
+        txt += f" Отставание от идеала растёт с числом процессов (эффективность {c(eff[-1])} на {ps[-1]})"
+        if share is not None and share < 0.12:
+            txt += (f", хотя пересылки при N = {nmax} занимают лишь {c(100 * share, 1)} % времени: основная потеря — "
+                    "в вычислительной части внутри узла (см. пояснение к таблице).")
+        else:
+            txt += " — это накладные расходы на пересылки данных."
     elif max(eff) > 1.05:
         txt += (" Эффективность выше 1 (сверхлинейное ускорение) объясняется кэшем: на каждый процесс приходится меньше строк A, "
                 "и рабочий набор лучше помещается в кэш процессора.")
@@ -312,6 +369,34 @@ def openmp_comparison(d):
             "масштабируется за пределы одного узла (распределённая память).")
 
 
+def scaling_summary(d):
+    """Сравнение удвоения числа процессов внутри узла и вместе с узлами (по времени вычислений, большие N)."""
+    if not d.comp:
+        return ""
+    big = [n for n in d.N if (d.comm_share(n, d.pmax) or 1) < 0.12]
+    inside, across = [], []
+    for a, b in zip(d.P, d.P[1:]):
+        if b != 2 * a:
+            continue
+        r = [d.comp[(n, a)] / d.comp[(n, b)] for n in big if (n, a) in d.comp and (n, b) in d.comp]
+        if not r:
+            continue
+        ka, kb = d.nodes_for(a) or 1, d.nodes_for(b) or 1
+        if ka == kb == 1 and a >= 4:
+            inside.append((a, b, sum(r) / len(r)))
+        elif kb > ka:
+            across.append((a, b, sum(r) / len(r)))
+    if not inside or not across:
+        return ""
+    ai = inside[-1]
+    ac = sum(x[2] for x in across) / len(across)
+    if ai[2] > ac - 0.2:
+        return ""
+    return (f" Для больших матриц (N ≥ {big[0]}) пересылки почти не влияют на время, а масштабирование упирается в общую память "
+            f"узла: удвоение {ai[0]}→{ai[1]} процессов на одном узле ускоряет вычисления в среднем в {c(ai[2])} раза, "
+            f"а удвоение вместе с числом узлов — в {c(ac)} раза.")
+
+
 def text_conclusion(d, where):
     nmax = d.N[-1]
     checked = [r for r in d.rows if r["verified"] != "NA"]
@@ -328,6 +413,7 @@ def text_conclusion(d, where):
         t += (f"При N = {nmax} получено ускорение "
               + ", ".join(f"{c(d.S(nmax, p))} на {p}" for p in ps)
               + f" процессах (эффективность {c(d.E(nmax, d.pmax))} на {d.pmax}).")
+        t += scaling_summary(d)
         t += openmp_comparison(d)
     return t.strip()
 
@@ -362,7 +448,10 @@ def write_report(d, figs, args, env):
     env_lines = [f"- **Платформа:** {where}"]
     if env.get("scheduler"):
         env_lines.append(f"- **Планировщик:** {env['scheduler']}; узлы задачи: {env.get('nodes', '-')}")
-    env_lines.append(f"- **Процессор узла:** {env['cpu']} ({env['cores_per_node']} ядер в узле)")
+    one_node = [p for p in d.P if d.nodes_for(p) == 1]
+    per_node = (f"; в задаче занималось по {one_node[-1]} процессов на узел"
+                if one_node and (d.nodes_for(d.pmax) or 1) > 1 else "")
+    env_lines.append(f"- **Процессор узла:** {env['cpu']} ({env['cores_per_node']} ядер в узле{per_node})")
     if env.get("distro") or env.get("os"):
         env_lines.append(f"- **ОС:** {env.get('distro') or ''} {('(' + env['os'] + ')') if env.get('os') else ''}".rstrip())
     env_lines.append(f"- **MPI:** {env['mpi']}; запуск: `{env.get('mpirun', 'mpirun')}`")
@@ -420,7 +509,7 @@ python3 tools/verify.py data/input_200.txt data/output_200_parallel_mpi_t4.txt
 
 ./tools/run_experiments_lab3.sh                              # серия локально
 ./tools/lab3_bundle.sh                                       # архив для кластера
-qsub tools/pbs_lab3.pbs                                      # серия на «Сергее Королёве» (Torque/PBS)
+sbatch tools/slurm_lab3.sbatch                               # серия на «Сергее Королёве» (SLURM)
 python3 tools/verify_lab3.py && python3 tools/plot_lab3.py   # проверка и этот отчёт
 ```
 

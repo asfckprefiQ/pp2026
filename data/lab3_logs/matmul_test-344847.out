@@ -1,0 +1,16 @@
+Модуль MPI: intel/mpi5
+mpirun: /soft/intel/impi/5.1.3.210/bin64/mpirun
+Узлы задачи: n[239,242], задач на узел: 8(x2)
+Сборка: mpicxx -O3 -o build/matmul_mpi src/matmul_mpi.cpp
+In file included from /soft/intel/impi/5.1.3.210/intel64/include/mpi.h:81:0,
+                 from src/matmul_mpi.cpp:21:
+/usr/lib/gcc/x86_64-redhat-linux/4.8.5/include/stdint.h:9:26: error: no include path in which to search for stdint.h
+ # include_next <stdint.h>
+                          ^
+In file included from /soft/intel/impi/5.1.3.210/intel64/include/mpi.h:2299:0,
+                 from src/matmul_mpi.cpp:21:
+/soft/intel/impi/5.1.3.210/intel64/include/mpicxx.h:123:20: fatal error: stdio.h: No such file or directory
+ # include <stdio.h>
+                    ^
+compilation terminated.
+cat: data/results_lab3.csv: No such file or directory
